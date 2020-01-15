@@ -9,7 +9,9 @@ option(BUILD_TESTS "Build unit tests" ON)
 
 add_definitions(-DASIO_STANDALONE)
 add_definitions(-DASIO_HAS_STD_CHRONO)
-
+if(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+    add_definitions(-DOS_FREEBSD)
+endif()
 # ASIO requires threads
 find_package(Threads REQUIRED)
 
@@ -128,6 +130,18 @@ target_include_directories(cornerstone PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include/${PROJECT_PREFIX}>
         PRIVATE src ${CMAKE_CURRENT_SOURCE_DIR}/asio/asio/include)
+
+add_executable(demo_server ${CMAKE_CURRENT_SOURCE_DIR}/demo/server.cxx ${HEADER_FILES})
+target_include_directories(demo_server PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        PRIVATE src ${CMAKE_CURRENT_SOURCE_DIR}/asio/asio/include)
+target_link_libraries(demo_server cornerstone)
+
+add_executable(demo_client ${CMAKE_CURRENT_SOURCE_DIR}/demo/client.cxx ${HEADER_FILES})
+target_include_directories(demo_client PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        PRIVATE src ${CMAKE_CURRENT_SOURCE_DIR}/asio/asio/include)
+target_link_libraries(demo_client cornerstone)
 
 if (BUILD_TESTS)
     target_include_directories(testr PUBLIC
