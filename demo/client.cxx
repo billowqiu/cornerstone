@@ -60,6 +60,10 @@ int main(int argc, const char* argv[])
     });
 
     client->send(msg, handler);
-
+    std::cout << "client sent... \n";
+    while (true)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5000));
+    }
     return 0;
 }
