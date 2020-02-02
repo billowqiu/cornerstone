@@ -152,7 +152,7 @@ namespace cornerstone {
                     asio::async_read(this->socket_, asio::buffer(this->log_data_->data(), (size_t)data_size), std::bind(&rpc_session::read_log_data, self, std::placeholders::_1, std::placeholders::_2));
                 }
                 else {
-                    l_->err(lstrfmt("failed to read rpc header from socket due to error %d").fmt(err.value()));
+                    l_->err(lstrfmt("failed to read rpc header from socket due to error %d:%s").fmt(err.value(), err.message().c_str()));
                     this->stop();
                 }
             });
@@ -175,7 +175,7 @@ namespace cornerstone {
                 this->read_complete();
             }
             else {
-                l_->err(lstrfmt("failed to read rpc log data from socket due to error %d").fmt(err.value()));
+                l_->err(lstrfmt("failed to read rpc log data from socket due to error %d:%s").fmt(err.value(), err.message().c_str()));
                 this->stop();
             }
         }
@@ -277,7 +277,7 @@ namespace cornerstone {
                     session->start();
                 }
                 else {
-                    this->l_->debug(sstrfmt("fails to accept a rpc connection due to error %d").fmt(err.value()));
+                    this->l_->debug(sstrfmt("fails to accept a rpc connection due to error %d:%s").fmt(err.value(), err.message().c_str()));
                 }
 
                 this->start();
@@ -323,7 +323,7 @@ namespace cornerstone {
                     }
                     else {
                         ptr<resp_msg> rsp;
-                        ptr<rpc_exception> except(cs_new<rpc_exception>(lstrfmt("failed to resolve host %s due to error %d").fmt(host_.c_str(), err.value()), req));
+                        ptr<rpc_exception> except(cs_new<rpc_exception>(lstrfmt("failed to resolve host %s due to error %d:%s").fmt(host_.c_str(), err.value(), err.message().c_str()), req));
                         when_done(rsp, except);
                     }
                 });
@@ -373,7 +373,7 @@ namespace cornerstone {
             }
             else {
                 ptr<resp_msg> rsp;
-                ptr<rpc_exception> except(cs_new<rpc_exception>(sstrfmt("failed to connect to remote socket %d").fmt(err.value()), req));
+                ptr<rpc_exception> except(cs_new<rpc_exception>(sstrfmt("failed to connect to remote socket %d:%s").fmt(err.value(), err.message().c_str()), req));
                 when_done(rsp, except);
             }
         }
@@ -391,7 +391,7 @@ namespace cornerstone {
             }
             else {
                 ptr<resp_msg> rsp;
-                ptr<rpc_exception> except(cs_new<rpc_exception>(sstrfmt("failed to send request to remote socket %d").fmt(err.value()), req));
+                ptr<rpc_exception> except(cs_new<rpc_exception>(sstrfmt("failed to send request to remote socket %d:%s").fmt(err.value(), err.message().c_str()), req));
                 socket_.close();
                 when_done(rsp, except);
             }
@@ -411,7 +411,7 @@ namespace cornerstone {
             }
             else {
                 ptr<resp_msg> rsp;
-                ptr<rpc_exception> except(cs_new<rpc_exception>(sstrfmt("failed to read response to remote socket %d").fmt(err.value()), req));
+                ptr<rpc_exception> except(cs_new<rpc_exception>(sstrfmt("failed to read response to remote socket %d:%s").fmt(err.value(), err.message().c_str()), req));
                 socket_.close();
                 when_done(rsp, except);
             }
@@ -478,7 +478,7 @@ void asio_service_impl::worker_entry() {
 
 void asio_service_impl::flush_all_loggers(asio::error_code /* err */) {
     if (continue_.load() == 1) {
-        log_flush_tm_.expires_after(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::hours(1000)));
+        log_flush_tm_.expires_after(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::seconds(5)));
         log_flush_tm_.async_wait([self = shared_from_this()](asio::error_code err) mutable {
             self->flush_all_loggers(err);
         });

@@ -41,6 +41,19 @@ bufptr cluster_config::serialize() {
     return result;
 }
 
+std::string cluster_config::to_string() const {
+    char buf[1024];
+    snprintf(buf, sizeof(buf), "log_idx: %llu, prev_log_idx: %llu, server size: %ld", log_idx_, prev_log_idx_, servers_.size());
+    std::string res(buf);
+    res.append(buf);
+    for (cluster_config::const_srv_itor it = servers_.begin(); it != servers_.end(); ++it) {
+        res.append("\n");
+        res.append((*it)->to_string());
+    }
+    
+    return res;
+}
+
 ptr<cluster_config> cluster_config::deserialize(buffer& buf) {
     ulong log_idx = buf.get_ulong();
     ulong prev_log_idx = buf.get_ulong();

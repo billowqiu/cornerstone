@@ -39,6 +39,14 @@ namespace cornerstone {
             next_idx_ = next_idx;
             accepted_ = true;
         }
+        std::string to_string() const {
+            char buf[128];
+            snprintf(buf, sizeof(buf), "next_idx: %llu, accepted: %d", next_idx_, accepted_);
+            std::string res(buf);
+            res.append("\nmsg_base: ");
+            res.append(msg_base::to_string());
+            return res;
+        }
     private:
         ulong next_idx_;
         bool accepted_;

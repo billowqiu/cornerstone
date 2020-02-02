@@ -38,6 +38,7 @@ namespace cornerstone {
         }
 
         bufptr serialize() const;
+        std::string to_string() const;
     private:
         int32 id_;
         std::string endpoint_;

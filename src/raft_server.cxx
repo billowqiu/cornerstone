@@ -215,9 +215,10 @@ ptr<resp_msg> raft_server::handle_append_entries(req_msg& req) {
     if (req.get_term() == state_->get_term()) {
         if (role_ == srv_role::candidate) {
             become_follower();
+            l_->info("from candidate to follower with recv append_entries");
         }
         else if (role_ == srv_role::leader) {
-            l_->debug(
+            l_->err(
                 lstrfmt("Receive AppendEntriesRequest from another leader(%d) with same term, there must be a bug, server exits")
                 .fmt(req.get_src()));
             ctx_->state_mgr_->system_exit(-1);
@@ -399,7 +400,7 @@ void raft_server::handle_election_timeout() {
 }
 
 void raft_server::request_vote() {
-    l_->info(sstrfmt("requestVote started with term %llu").fmt(state_->get_term()));
+    l_->info(sstrfmt("requestVote started with term %llu, peer size: %u").fmt(state_->get_term(), peers_.size()));
     state_->set_voted_for(id_);
     ctx_->state_mgr_->save_state(*state_);
     votes_granted_ += 1;
@@ -412,6 +413,7 @@ void raft_server::request_vote() {
         if (votes_granted_ > (int32)(peers_.size() + 1) / 2) {
             election_completed_ = true;
             become_leader();
+            l_->info(sstrfmt("only one server peer size: %u, become_leader").fmt(peers_.size()));
             return;
         }
 
@@ -505,6 +507,7 @@ void raft_server::handle_append_entries_resp(resp_msg& resp) {
     bool need_to_catchup = true;
     ptr<peer> p = it->second;
     if (resp.get_accepted()) {
+        // 更新peer相应的index
         {
             std::lock_guard<std::mutex>(p->get_lock());
             p->set_next_log_idx(resp.get_next_idx());
@@ -514,13 +517,20 @@ void raft_server::handle_append_entries_resp(resp_msg& resp) {
         // try to commit with this response
         static std::vector<ulong> matched_indexes;
         matched_indexes.clear();
+        // 先把自己的加进去
         matched_indexes.emplace_back(log_store_->next_slot() - 1);
         int i = 1;
         for (it = peers_.begin(); it != peers_.end(); ++it, ++i) {
             matched_indexes.emplace_back(it->second->get_matched_idx());
+            l_->info(sstrfmt("peer: %s matched_index: %llu").fmt(it->second->get_config().to_string().c_str(), it->second->get_matched_idx()));
         }
 
         std::sort(matched_indexes.begin(), matched_indexes.end(), std::greater<ulong>());
+        for(ulong matched_index : matched_indexes) {
+            l_->info(sstrfmt("sorted matched_index: %llu").fmt(matched_index));
+        }
+        l_->info(sstrfmt("(peers_.size() + 1) / 2: %d").fmt((peers_.size() + 1) / 2));
+        // 按照从大到小排序，取大于1/2的索引，以决定是否超过半数的节点有应答
         commit(matched_indexes[(peers_.size() + 1) / 2]);
         need_to_catchup = p->clear_pending_commit() || resp.get_next_idx() < log_store_->next_slot();
     }
@@ -729,12 +739,14 @@ void raft_server::become_follower() {
 
 bool raft_server::update_term(ulong term) {
     if (term > state_->get_term()) {
+        l_->info(lstrfmt("become_follower with update term: %llu -> %llu").fmt(state_->get_term(), term));
         state_->set_term(term);
         state_->set_voted_for(-1);
         election_completed_ = false;
         votes_granted_ = 0;
         voted_servers_.clear();
         ctx_->state_mgr_->save_state(*state_);
+        
         become_follower();
         return true;
     }
@@ -742,7 +754,66 @@ bool raft_server::update_term(ulong term) {
     return false;
 }
 
+/*
+    2/2/2020 15:44:14.319	[1011843720]	info	peer: id: 4, endpoint: tcp://127.0.0.1:9004 matched_index: 4
+    2/2/2020 15:44:14.319	[1011843720]	info	peer: id: 3, endpoint: tcp://127.0.0.1:9003 matched_index: 4
+    2/2/2020 15:44:14.319	[1011843720]	info	peer: id: 2, endpoint: tcp://127.0.0.1:9002 matched_index: 4
+    2/2/2020 15:44:14.319	[1011843720]	info	sorted matched_index: 4
+    2/2/2020 15:44:14.319	[1011843720]	info	sorted matched_index: 4
+    2/2/2020 15:44:14.319	[1011843720]	info	sorted matched_index: 4
+    2/2/2020 15:44:14.319	[1011843720]	info	sorted matched_index: 4
+    2/2/2020 15:44:14.319	[1011843720]	info	(peers_.size() + 1) / 2: 2
+    2/2/2020 15:44:14.319	[1011843720]	info	commit target_idx: 4, quick_commit_idx: 4
+    2/2/2020 15:44:14.319	[1011843720]	info	log_store_->next_slot() - 1: 4 > sm_commit_index: 4 && quick_commit_idx: 4 > sm_commit_index: 4
+
+    下面为收到client请求了，注意log_store_->next_slot()有变化
+    2/2/2020 15:44:14.346	[505528282]	dbug	receive a incoming rpc connection
+    2/2/2020 15:44:14.346	[882593070]	dbug	Receive a client_request message from 0 with LastLogIndex=0, LastLogTerm=0, EntriesLength=1, CommitIndex=0 and Term=0
+
+    开始发送请求给其他节点了
+    2/2/2020 15:44:14.347	[882593070]	dbug	An AppendEntries Request for 4 with LastLogIndex=4, LastLogTerm=1, EntriesLength=1, CommitIndex=4 and Term=1
+    2/2/2020 15:44:14.347	[882593070]	dbug	An AppendEntries Request for 3 with LastLogIndex=4, LastLogTerm=1, EntriesLength=1, CommitIndex=4 and Term=1
+    2/2/2020 15:44:14.347	[882593070]	dbug	An AppendEntries Request for 2 with LastLogIndex=4, LastLogTerm=1, EntriesLength=1, CommitIndex=4 and Term=1
+
+    回应给客户端
+    2/2/2020 15:44:14.347	[882593070]	dbug	Response back a append_entries_response message to 1 with Accepted=1, Term=1, NextIndex=6
+
+    收到了一个节点4的回应了
+    2/2/2020 15:44:14.348	[-1299759016]	dbug	Receive a append_entries_response message from peer 4 with Result=1, Term=1, NextIndex=6
+    2/2/2020 15:44:14.348	[-1299759016]	info	peer: id: 4, endpoint: tcp://127.0.0.1:9004 matched_index: 5
+    2/2/2020 15:44:14.348	[-1299759016]	info	peer: id: 3, endpoint: tcp://127.0.0.1:9003 matched_index: 4
+    2/2/2020 15:44:14.348	[-1299759016]	info	peer: id: 2, endpoint: tcp://127.0.0.1:9002 matched_index: 4
+    2/2/2020 15:44:14.348	[-1299759016]	info	sorted matched_index: 5
+    2/2/2020 15:44:14.348	[-1299759016]	info	sorted matched_index: 5
+    2/2/2020 15:44:14.348	[-1299759016]	info	sorted matched_index: 4
+    2/2/2020 15:44:14.348	[-1299759016]	info	sorted matched_index: 4
+    2/2/2020 15:44:14.348	[-1299759016]	info	(peers_.size() + 1) / 2: 2
+    2/2/2020 15:44:14.348	[-1299759016]	info	commit target_idx: 4, quick_commit_idx: 4
+    2/2/2020 15:44:14.348	[-1299759016]	info	log_store_->next_slot() - 1: 5 > sm_commit_index: 4 && quick_commit_idx: 4 > sm_commit_index: 4
+
+    收到了节点2的回应，此时收到半数以上节点的回应了，可以提交
+    2/2/2020 15:44:14.348	[505528282]	dbug	Receive a append_entries_response message from peer 3 with Result=1, Term=1, NextIndex=6
+    2/2/2020 15:44:14.348	[505528282]	info	peer: id: 4, endpoint: tcp://127.0.0.1:9004 matched_index: 5
+    2/2/2020 15:44:14.348	[505528282]	info	peer: id: 3, endpoint: tcp://127.0.0.1:9003 matched_index: 5
+    2/2/2020 15:44:14.348	[505528282]	info	peer: id: 2, endpoint: tcp://127.0.0.1:9002 matched_index: 4
+    2/2/2020 15:44:14.348	[505528282]	info	sorted matched_index: 5
+    2/2/2020 15:44:14.348	[505528282]	info	sorted matched_index: 5
+    2/2/2020 15:44:14.348	[505528282]	info	sorted matched_index: 5
+    2/2/2020 15:44:14.348	[505528282]	info	sorted matched_index: 4
+    2/2/2020 15:44:14.348	[882593070]	dbug	Receive a append_entries_response message from peer 2 with Result=1, Term=1, NextIndex=6
+    2/2/2020 15:44:14.348	[505528282]	info	(peers_.size() + 1) / 2: 2
+    2/2/2020 15:44:14.348	[505528282]	info	commit target_idx: 5, quick_commit_idx: 4
+    2/2/2020 15:44:14.348	[505528282]	info	request peer: id: 4, endpoint: tcp://127.0.0.1:9004 to commit
+    2/2/2020 15:44:14.348	[505528282]	dbug	An AppendEntries Request for 4 with LastLogIndex=5, LastLogTerm=1, EntriesLength=0, CommitIndex=5 and Term=1
+    2/2/2020 15:44:14.348	[505528282]	info	request peer: id: 3, endpoint: tcp://127.0.0.1:9003 to commit
+    2/2/2020 15:44:14.348	[505528282]	dbug	An AppendEntries Request for 3 with LastLogIndex=5, LastLogTerm=1, EntriesLength=0, CommitIndex=5 and Term=1
+    2/2/2020 15:44:14.348	[505528282]	info	request peer: id: 2, endpoint: tcp://127.0.0.1:9002 to commit
+    2/2/2020 15:44:14.348	[505528282]	dbug	An AppendEntries Request for 2 with LastLogIndex=4, LastLogTerm=1, EntriesLength=1, CommitIndex=5 and Term=1
+    2/2/2020 15:44:14.348	[505528282]	info	log_store_->next_slot() - 1: 5 > sm_commit_index: 4 && quick_commit_idx: 5 > sm_commit_index: 4
+    2/2/2020 15:44:14.348	[505528282]	info	notify commit thread to commit, 5
+*/
 void raft_server::commit(ulong target_idx) {
+    l_->info(sstrfmt("commit target_idx: %llu, quick_commit_idx: %llu").fmt(target_idx, quick_commit_idx_));
     if (target_idx > quick_commit_idx_) {
         quick_commit_idx_ = target_idx;
 
@@ -750,15 +821,20 @@ void raft_server::commit(ulong target_idx) {
         // for peers that are free, send the request, otherwise, set pending commit flag for that peer
         if (role_ == srv_role::leader) {
             read_lock(peers_lock_);
+            // 告知follower也可以commit了
             for (peer_itor it = peers_.begin(); it != peers_.end(); ++it) {
+                l_->info(sstrfmt("request peer: %s to commit").fmt(it->second->get_config().to_string().c_str()));
                 if (!request_append_entries(*(it->second))) {
                     it->second->set_pending_commit();
                 }
             }
         }
     }
-
+    l_->info(sstrfmt("log_store_->next_slot() - 1: %llu > sm_commit_index: %llu && quick_commit_idx: %llu > sm_commit_index: %llu").
+        fmt(log_store_->next_slot() - 1, sm_commit_index_, quick_commit_idx_, sm_commit_index_));
+    // 每次append以后，next_slot()就会加+1
     if (log_store_->next_slot() - 1 > sm_commit_index_ && quick_commit_idx_ > sm_commit_index_) {
+        l_->info(sstrfmt("notify commit thread to commit, %llu").fmt(target_idx, quick_commit_idx_));
         commit_cv_.notify_one();
     }
 }
@@ -907,7 +983,7 @@ void raft_server::reconfigure(const ptr<cluster_config>& new_config) {
     l_->debug(
         lstrfmt("system is reconfigured to have %d servers, last config index: %llu, this config index: %llu")
         .fmt(new_config->get_servers().size(), new_config->get_prev_log_idx(), new_config->get_log_idx()));
-
+    l_->debug(lstrfmt("new cluster_config: %s").fmt(new_config->to_string().c_str()));
     // we only allow one server to be added or removed at a time
     std::vector<int32> srvs_removed;
     std::vector<ptr<srv_config>> srvs_added;
@@ -950,6 +1026,7 @@ void raft_server::reconfigure(const ptr<cluster_config>& new_config) {
             enable_hb_for_peer(*p);
             if (srv_to_join_ && srv_to_join_->get_id() == p->get_id()) {
                 p->set_next_log_idx(srv_to_join_->get_next_log_idx());
+                l_->info(sstrfmt("reset svr_to_join peer: %s").fmt(srv_to_join_->get_config().to_string().c_str()));
                 srv_to_join_.reset();
             }
         }
@@ -1011,6 +1088,7 @@ ptr<resp_msg> raft_server::handle_install_snapshot_req(req_msg& req) {
     if (req.get_term() == state_->get_term() && !catching_up_) {
         if (role_ == srv_role::candidate) {
             become_follower();
+            l_->info("become_follower with install_snapshot_req: %llu -> %llu");
         }
         else if (role_ == srv_role::leader) {
             l_->err(lstrfmt("Receive InstallSnapshotRequest from another leader(%d) with same term, there must be a bug, server exits").fmt(req.get_src()));
@@ -1371,6 +1449,7 @@ void raft_server::sync_log_to_new_srv(ulong start_idx) {
     int32 gap = (int32)(quick_commit_idx_ - start_idx);
     if (gap < ctx_->params_->log_sync_stop_gap_) {
         l_->info(lstrfmt("LogSync is done for server %d with log gap %d, now put the server into cluster").fmt(srv_to_join_->get_id(), gap));
+        // 追加当前的cluster_config
         ptr<cluster_config> new_conf = cs_new<cluster_config>(log_store_->next_slot(), config_->get_log_idx());
         new_conf->get_servers().insert(new_conf->get_servers().end(), config_->get_servers().begin(), config_->get_servers().end());
         new_conf->get_servers().push_back(conf_to_add_);
@@ -1418,6 +1497,8 @@ ptr<resp_msg> raft_server::handle_join_cluster_req(req_msg& req) {
     catching_up_ = true;
     role_ = srv_role::follower;
     leader_ = req.get_src();
+    l_->info(lstrfmt("recv join_cluster_req server: %d is going to follower, leader is: %d").fmt(id_, leader_));
+
     sm_commit_index_ = 0;
     quick_commit_idx_ = 0;
     state_->set_voted_for(-1);

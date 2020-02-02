@@ -38,8 +38,8 @@ namespace cornerstone {
         const char* fmt_;
     };
 
-    typedef strfmt<100> sstrfmt;
-    typedef strfmt<200> lstrfmt;
+    typedef strfmt<1024> sstrfmt;
+    typedef strfmt<2048> lstrfmt;
 }
 
 #endif //_STRING_FORMATTER_HXX_

@@ -62,6 +62,7 @@ namespace cornerstone {
         }
 
         bufptr serialize();
+        std::string to_string() const;
     private:
         ulong log_idx_;
         ulong prev_log_idx_;

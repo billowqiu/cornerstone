@@ -32,3 +32,11 @@ bufptr srv_config::serialize() const{
     buf->pos(0);
     return buf;
 }
+
+std::string srv_config::to_string() const {
+    char buf[64];
+    snprintf(buf, sizeof(buf), "id: %d, endpoint: %s", id_, endpoint_.c_str());
+    std::string res(buf);
+    
+    return res;
+}

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.9)
 project(cornerstone VERSION 0.0.0 LANGUAGES CXX)
-
+set(CMAKE_VERBOSE_MAKEFILE true)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 include(CheckIPOSupported)
@@ -22,9 +22,11 @@ if(NOT CMAKE_BUILD_TYPE)
             FORCE)
 endif(NOT CMAKE_BUILD_TYPE)
 
+message("CMAKE_BUILD_TYPE: " ${CMAKE_BUILD_TYPE})
 # Set default optimizations
 if(CMAKE_COMPILER_IS_GNUCXX)
-    set(CMAKE_CXX_FLAGS "-Wall -Wextra")
+    message("compiler is gnucxx")
+    set(CMAKE_CXX_FLAGS "-std=c++17 -Wall -Wextra")
     set(CMAKE_CXX_FLAGS_DEBUG "-g")
     set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 endif()
@@ -142,6 +144,12 @@ target_include_directories(demo_client PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         PRIVATE src ${CMAKE_CURRENT_SOURCE_DIR}/asio/asio/include)
 target_link_libraries(demo_client cornerstone)
+
+add_executable(tool ${CMAKE_CURRENT_SOURCE_DIR}/demo/tool.cxx ${HEADER_FILES})
+target_include_directories(tool PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        PRIVATE src ${CMAKE_CURRENT_SOURCE_DIR}/asio/asio/include)
+target_link_libraries(tool cornerstone)
 
 if (BUILD_TESTS)
     target_include_directories(testr PUBLIC

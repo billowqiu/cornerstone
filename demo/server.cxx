@@ -18,7 +18,7 @@
 #include "../include/cornerstone.hxx"
 #include <iostream>
 #include <cassert>
-
+#include <filesystem>
 using namespace cornerstone;
 
 extern void cleanup(const std::string& folder);
@@ -49,15 +49,14 @@ class simple_state_mgr: public state_mgr{
 public:
     simple_state_mgr(int32 srv_id)
         : srv_id_(srv_id) {
-        store_path_ = sstrfmt("store%d").fmt(srv_id_);
+        store_path_ = std::string(std::filesystem::current_path().string() + sstrfmt("/store%d").fmt(srv_id_));
     }
 
 public:
     virtual ptr<cluster_config> load_config() {
         ptr<cluster_config> conf = cs_new<cluster_config>();
-        conf->get_servers().push_back(cs_new<srv_config>(1, "tcp://127.0.0.1:9001"));
-        conf->get_servers().push_back(cs_new<srv_config>(2, "tcp://127.0.0.1:9002"));
-        conf->get_servers().push_back(cs_new<srv_config>(3, "tcp://127.0.0.1:9003"));
+        // 把自己加到集群！！！，否则集群配置不会包括自己
+        conf->get_servers().push_back(cs_new<srv_config>(srv_id_, "tcp://127.0.0.1:900"+std::to_string(srv_id_)));
         return conf;
     }
 
@@ -211,5 +210,3 @@ int main(int argc, const char* argv[])
 
     return 0;
 }
-
-

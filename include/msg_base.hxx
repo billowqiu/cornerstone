@@ -42,6 +42,13 @@ namespace cornerstone {
             return this->dst_;
         }
 
+        std::string to_string() const {
+            char buf[64];
+            snprintf(buf, sizeof(buf), "term: %llu, msg_type: %d, src: %d, dst: %d", term_, type_, src_, dst_);
+            std::string res(buf);
+            
+            return res;
+        }
     __nocopy__(msg_base)
 
     private:
